@@ -16,7 +16,7 @@ pub struct FnDef {
     pub name: String,
     pub args: Vec<VarDef>,
     // return type
-    pub body: Expr,
+    pub body: Vec<Expr>,
 }
 
 #[derive(Clone, Debug)]

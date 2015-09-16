@@ -86,10 +86,11 @@ pub fn translate_fn_def(module: &mut Module, fn_def: &ast::FnDef) {
         let builder = LLVMCreateBuilderInContext(module.context);
         LLVMPositionBuilderAtEnd(builder, bb);
 
-        translate_expr(&fn_def.body, module, builder);
+        for expr in &fn_def.body {
+            translate_expr(expr, module, builder);
+        }
 
-        let number = LLVMConstInt(i32_type, 0, 0);
-        LLVMBuildRet(builder, number);
+        LLVMBuildRet(builder, LLVMConstInt(i32_type, 0, 0));
 
         LLVMVerifyModule(module.raw, LLVMPrintMessageAction, ptr::null_mut());
         LLVMDisposeBuilder(builder);

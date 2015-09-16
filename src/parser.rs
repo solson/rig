@@ -248,9 +248,14 @@ impl<'src> Parser<'src> {
         try!(self.expect(&Token::ParenR));
         try!(self.expect(&Token::BraceL));
 
-        let body = try!(self.parse_expr());
+        let mut body = Vec::new();
 
-        try!(self.expect(&Token::BraceR));
+        while self.token != Token::BraceR {
+            body.push(try!(self.parse_expr()));
+        }
+
+        // Skip the closing brace.
+        self.advance();
 
         Ok(ast::FnDef {
             name: name,
