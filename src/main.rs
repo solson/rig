@@ -17,7 +17,7 @@ fn main() {
     println!("\n---- PARSED ----\n");
 
     let module = parser::load_and_parse(&args[0]).unwrap().unwrap();
-    println!("{:?}", module);
+    println!("{:#?}", module);
 
     println!("\n---- LLVM'D ----\n");
 
