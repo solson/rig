@@ -221,6 +221,16 @@ impl<'src> Parser<'src> {
     //     }
     // }
 
+    fn parse_module(&mut self) -> ParseResult<ast::Module> {
+        let mut fns = Vec::new();
+
+        while self.token != Token::Eof {
+            fns.push(try!(self.parse_fn_def()));
+        }
+
+        Ok(ast::Module { fns: fns })
+    }
+
     fn parse_fn_def(&mut self) -> ParseResult<ast::FnDef> {
         try!(self.expect(&Token::KeywordFn));
 
@@ -298,11 +308,11 @@ impl<'src> Parser<'src> {
     }
 }
 
-pub fn load_and_parse<P: AsRef<Path>>(path: P) -> io::Result<Option<ast::FnDef>> {
+pub fn load_and_parse<P: AsRef<Path>>(path: P) -> io::Result<Option<ast::Module>> {
     let mut contents = String::new();
     let mut file = try!(File::open(path));
     try!(file.read_to_string(&mut contents));
 
     let mut parser = Parser::new(&contents);
-    Ok(parser.parse_fn_def().ok())
+    Ok(parser.parse_module().ok())
 }

@@ -1,6 +1,11 @@
 //! Abstract syntax tree.
 
 #[derive(Clone, Debug)]
+pub struct Module {
+    pub fns: Vec<FnDef>,
+}
+
+#[derive(Clone, Debug)]
 pub struct VarDef {
     pub name: String,
     // type

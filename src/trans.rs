@@ -55,17 +55,29 @@ impl Drop for Module {
     }
 }
 
-pub fn translate_fn_def(fn_def: &ast::FnDef) -> Module {
-    unsafe {
-        let module = Module::new("rig");
-        let i32_type = LLVMInt32TypeInContext(module.context);
+pub fn translate_module(ast_module: &ast::Module) -> Module {
+    let mut module = Module::new("rig");
 
+    // Declare built-in print function.
+    unsafe {
+        let i32_type = LLVMInt32TypeInContext(module.context);
         let string_type = LLVMPointerType(LLVMInt8TypeInContext(module.context), 0);
         let mut arg_types = [string_type];
         let puts_type = LLVMFunctionType(i32_type, arg_types.as_mut_ptr(),
                                          arg_types.len() as c_uint, 0);
         LLVMAddFunction(module.raw, c_str!("puts"), puts_type);
+    }
 
+    for fn_ in &ast_module.fns {
+        translate_fn_def(&mut module, fn_);
+    }
+
+    module
+}
+
+pub fn translate_fn_def(module: &mut Module, fn_def: &ast::FnDef) {
+    unsafe {
+        let i32_type = LLVMInt32TypeInContext(module.context);
         let func_type = LLVMFunctionType(i32_type, ptr::null_mut(), 0, 0);
         let func_name = CString::new(fn_def.name.clone()).unwrap();
         let func = LLVMAddFunction(module.raw, func_name.as_ptr(), func_type);
@@ -74,15 +86,13 @@ pub fn translate_fn_def(fn_def: &ast::FnDef) -> Module {
         let builder = LLVMCreateBuilderInContext(module.context);
         LLVMPositionBuilderAtEnd(builder, bb);
 
-        translate_expr(&fn_def.body, &module, builder);
+        translate_expr(&fn_def.body, module, builder);
 
         let number = LLVMConstInt(i32_type, 0, 0);
         LLVMBuildRet(builder, number);
 
         LLVMVerifyModule(module.raw, LLVMPrintMessageAction, ptr::null_mut());
         LLVMDisposeBuilder(builder);
-
-        module
     }
 }
 
