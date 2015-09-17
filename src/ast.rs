@@ -8,14 +8,19 @@ pub struct Module {
 #[derive(Clone, Debug)]
 pub struct VarDef {
     pub name: String,
-    // type
+    pub ty: Type,
+}
+
+#[derive(Clone, Debug)]
+pub enum Type {
+    Unit,
 }
 
 #[derive(Clone, Debug)]
 pub struct FnDef {
     pub name: String,
+    pub return_ty: Type,
     pub args: Vec<VarDef>,
-    // return type
     pub body: Vec<Expr>,
 }
 

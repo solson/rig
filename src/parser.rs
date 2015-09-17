@@ -259,6 +259,7 @@ impl<'src> Parser<'src> {
 
         Ok(ast::FnDef {
             name: name,
+            return_ty: ast::Type::Unit,
             args: Vec::new(),
             body: body,
         })
