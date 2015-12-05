@@ -1,10 +1,8 @@
-use std::io::prelude::*;
-
+use ast;
 use std::{io, mem};
 use std::fs::File;
+use std::io::prelude::*;
 use std::path::Path;
-
-use ast;
 
 // Lexer tokens
 

@@ -1,11 +1,7 @@
-extern crate libc;
-extern crate llvm_sys;
+extern crate rig;
 
+use rig::{parser, trans};
 use std::{env, process};
-
-mod ast;
-mod parser;
-mod trans;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
