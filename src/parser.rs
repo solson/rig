@@ -1,158 +1,321 @@
 use ast;
 use std::{io, mem};
+use std::borrow::Borrow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::prelude::*;
-use std::path::Path;
+use std::rc::Rc;
 
-// Lexer tokens
+////////////////////////////////////////////////////////////////////////////////
+// Interned strings
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Name(u32);
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct RcString(Rc<String>);
+
+impl From<String> for RcString {
+    fn from(s: String) -> Self {
+        RcString(Rc::new(s))
+    }
+}
+
+impl<'a> From<&'a str> for RcString {
+    fn from(s: &str) -> Self {
+        RcString::from(String::from(s))
+    }
+}
+
+impl Borrow<str> for RcString {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+struct StrInterner {
+    map: RefCell<HashMap<RcString, Name>>,
+    vec: RefCell<Vec<RcString>>,
+}
+
+impl StrInterner {
+    fn new() -> Self {
+        StrInterner {
+            map: RefCell::new(HashMap::new()),
+            vec: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn intern(&self, string: &str) -> Name {
+        let mut map = self.map.borrow_mut();
+        let mut vec = self.vec.borrow_mut();
+
+        if let Some(&idx) = map.get(string) {
+            return idx;
+        }
+
+        let new_idx = Name(vec.len() as u32);
+        let rc_str = RcString::from(string);
+        map.insert(rc_str.clone(), new_idx);
+        vec.push(rc_str);
+        new_idx
+    }
+}
+
+fn interner() -> Rc<StrInterner> {
+    thread_local!(static KEY: Rc<StrInterner> = Rc::new(StrInterner::new()));
+    KEY.with(|k| k.clone())
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Lexer
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
+
+impl Token {
+    pub fn new(start: usize, end: usize, kind: TokenKind) -> Self {
+        Token { kind: kind, span: Span::new(start, end) }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Token {
-    Ident(String),
+pub enum TokenKind {
+    Symbol(Name),
     StrLit(String),
-
-    KeywordFn,
-
     ParenL,
     ParenR,
     BraceL,
     BraceR,
+    BracketL,
+    BracketR,
     Semicolon,
-
     Eof,
     Invalid,
 }
 
-// #[derive(Clone, Debug)]
-// struct TokenAndSpan {
-//     token: Token,
-//     span: Span,
-// }
-
-// /// A reference to a contiguous region of a source file.
-// #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-// struct Span {
-//     start: usize,
-//     end: usize,
-// }
-
-
-// Errors
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Error {
-    message: String,
-    // span: Span,
+/// A reference to a contiguous region of a source file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
 }
 
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Span { start: start, end: end }
+    }
 
-// Lexer
+    pub fn point(pos: usize) -> Self {
+        Span { start: pos, end: pos }
+    }
+}
 
 #[derive(Clone, Debug)]
-struct Lexer<'src> {
+pub struct Lexer<'src> {
     source: &'src str,
     position: usize,
+    token_start: usize,
+    current: Option<char>,
 }
 
 impl<'src> Lexer<'src> {
-    fn new(source: &'src str) -> Lexer<'src> {
-        Lexer {
-            source: source,
-            position: 0,
-        }
+    pub fn new(source: &'src str) -> Self {
+        let mut lexer = Lexer { source: source, position: 0, token_start: 0, current: None };
+        lexer.current = lexer.char_at(0);
+        lexer
     }
 
-    fn next_token(&mut self) -> Token {
-        let c = match self.read_char() {
+    pub fn next(&mut self) -> Token {
+        use self::TokenKind::*;
+
+        self.token_start = self.position;
+
+        let c = match self.current {
             Some(c) => c,
-            None    => return Token::Eof,
+            None => return Token::new(self.position, self.position, TokenKind::Eof),
         };
 
-        match c {
-            c if is_whitespace(c) => {
-                self.skip_whitespace();
-                self.next_token()
-            }
+        self.advance();
 
-            c if is_ident_start(c) => {
-                self.unread_char();
-                self.lex_ident_or_keyword()
-            }
+        let kind = match c {
+            '"' => StrLit(self.lex_string()),
+            '(' => ParenL,
+            ')' => ParenR,
+            '{' => BraceL,
+            '}' => BraceR,
+            '[' => BracketL,
+            ']' => BracketR,
+            ';' => Semicolon,
+            _ => Invalid,
+        };
 
-            '"' => self.lex_string(),
-
-            '(' => Token::ParenL,
-            ')' => Token::ParenR,
-            '{' => Token::BraceL,
-            '}' => Token::BraceR,
-            ';' => Token::Semicolon,
-
-            _ => Token::Invalid,
-        }
+        Token::new(self.token_start, self.position, kind)
     }
 
-    fn lex_ident_or_keyword(&mut self) -> Token {
-        let mut ident = String::new();
-
-        while let Some(c) = self.read_char() {
-            if !is_ident_continue(c) {
-                self.unread_char();
-                break;
-            }
-
-            ident.push(c);
-        }
-
-        match &ident[..] {
-            "fn" => Token::KeywordFn,
-            _ => Token::Ident(ident),
-        }
-    }
-
-    fn lex_string(&mut self) -> Token {
+    /// Lex a string, assuming the initial " has already been consumed.
+    fn lex_string(&mut self) -> String {
         let mut string = String::new();
 
-        while let Some(c) = self.read_char() {
+        loop {
+            let c = match self.current {
+                Some(c) => c,
+                None => {
+                    errors().report(Span::point(self.position),
+                                    ErrorLevel::Error,
+                                    "unterminated string literal");
+                    errors().report(Span::point(self.token_start),
+                                    ErrorLevel::Note,
+                                    "string literal began here");
+                    break;
+                }
+            };
+
+            let escape_start = self.position;
+            self.advance();
+
             match c {
+                '\\' => {
+                    let escaped = match self.current { Some(c) => c, None => break };
+                    self.advance();
+
+                    string.push(match escaped {
+                        '\\' | '"' => escaped,
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        c => {
+                            errors().report(Span::new(escape_start, self.position),
+                                            ErrorLevel::Error,
+                                            format!("invalid character escape: {}", c));
+                            c
+                        }
+                    });
+                }
+
                 '"' => break,
-                '\\' => unimplemented!(),
-                _ => string.push(c),
+                c => string.push(c),
             }
         }
 
-        Token::StrLit(string)
+        string
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.read_char() {
-            if !is_whitespace(c) {
-                self.unread_char();
-                break;
-            }
-        }
+    // fn report_error<S: Into<String>>(&self, message: S) {
+    //     errors().report(Span::new(self.token_start, self.position), message.into());
+    // }
+
+    fn peek(&self) -> Option<char> {
+        self.current.and_then(|c| self.char_at(self.position + c.len_utf8()))
     }
 
-    fn read_char(&mut self) -> Option<char> {
-        // Get the char that begins at self.position.
-        let opt_c = self.source[self.position..].chars().next();
+    fn char_at(&self, pos: usize) -> Option<char> {
+        self.source[pos..].chars().next()
+    }
 
-        if let Some(c) = opt_c {
+    /// Move to the next char in the source code.
+    fn advance(&mut self) {
+        if let Some(c) = self.current {
             self.position += c.len_utf8();
+            self.current = self.char_at(self.position);
+        } else {
+            panic!("lexer attempted to advance past the end of the source code");
         }
-
-        opt_c
-    }
-
-    /// Step backwards one `char` in the input. Must not be called more times than `read_char` has
-    /// been called.
-    fn unread_char(&mut self) {
-        assert!(self.position != 0);
-
-        // Get the index of the char that comes before the char at self.position.
-        let (prev_pos, _) = self.source[..self.position].char_indices().next_back().unwrap();
-        self.position = prev_pos;
     }
 }
+
+pub fn tokenize(source: &str) -> Vec<Token> {
+    let mut lexer = Lexer::new(source);
+    vec![]
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Parser
+////////////////////////////////////////////////////////////////////////////////
+
+// #[derive(Clone, Debug)]
+// struct Parser<'src> {
+//     lexer: Lexer<'src>,
+//     errors: Vec<Error>,
+// }
+
+    // fn parse_module(&mut self) -> ParseResult<ast::Module> {
+    //     let mut fns = Vec::new();
+    //     while self.token != Token::Eof {
+    //         fns.push(try!(self.parse_fn_def()));
+    //     }
+    //     Ok(ast::Module { fns: fns })
+    // }
+
+    // fn parse_fn_def(&mut self) -> ParseResult<ast::FnDef> {
+    //     try!(self.expect(&Token::KeywordFn));
+
+    //     let name = match self.advance_and_get() {
+    //         Token::Ident(name) => name,
+
+    //         // TODO(tsion): Add an error to self.errors.
+    //         _ => return Err(()),
+    //     };
+
+    //     try!(self.expect(&Token::ParenL));
+
+    //     // TODO(tsion): Parse arguments.
+
+    //     try!(self.expect(&Token::ParenR));
+    //     try!(self.expect(&Token::BraceL));
+
+    //     let mut body = Vec::new();
+
+    //     while self.token != Token::BraceR {
+    //         body.push(try!(self.parse_expr()));
+    //     }
+
+    //     // Skip the closing brace.
+    //     self.advance();
+
+    //     Ok(ast::FnDef {
+    //         name: name,
+    //         return_ty: ast::Type::Unit,
+    //         args: Vec::new(),
+    //         body: body,
+    //     })
+    // }
+
+    // fn parse_expr(&mut self) -> ParseResult<ast::Expr> {
+    //     let func = match self.advance_and_get() {
+    //         Token::Ident(name) => name,
+
+    //         // TODO(tsion): Add an error to self.errors.
+    //         _ => return Err(()),
+    //     };
+
+    //     try!(self.expect(&Token::ParenL));
+
+    //     let str = match self.advance_and_get() {
+    //         Token::StrLit(str) => str,
+
+    //         // TODO(tsion): Add an error to self.errors.
+    //         _ => return Err(()),
+    //     };
+
+    //     try!(self.expect(&Token::ParenR));
+    //     try!(self.expect(&Token::Semicolon));
+
+    //     Ok(ast::Expr::FnCall {
+    //         func: func,
+    //         args: vec![ast::Expr::StrLit(str)],
+    //     })
+    // }
+
+////////////////////////////////////////////////////////////////////////////////
+// Character classes
+////////////////////////////////////////////////////////////////////////////////
 
 /// Returns `true` if the given character is whitespace.
 fn is_whitespace(c: char) -> bool {
@@ -183,140 +346,74 @@ fn is_ident_continue(c: char) -> bool {
     is_ident_start(c) || is_digit(c)
 }
 
-
-
-// Parser
+////////////////////////////////////////////////////////////////////////////////
+// Errors
+////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Clone, Debug)]
-struct Parser<'src> {
-    lexer: Lexer<'src>,
-    token: Token,
-    last_token: Token,
-    errors: Vec<Error>,
+pub struct Error {
+    pub message: String,
+    pub level: ErrorLevel,
+    pub span: Span,
 }
 
-// Using a Result<T, ()> instead of Option<T> for the try! macro.
-type ParseResult<T> = Result<T, ()>;
+#[derive(Clone, Debug)]
+pub enum ErrorLevel {
+    Error,
+    Warning,
+    Note,
+}
 
-impl<'src> Parser<'src> {
-    fn new(source: &'src str) -> Parser<'src> {
-        let mut parser = Parser {
-            lexer: Lexer::new(source),
-            token: Token::Invalid,
-            last_token: Token::Invalid,
-            errors: Vec::new(),
-        };
+pub struct ErrorReporter {
+    pub errors: RefCell<Vec<Error>>,
+}
 
-        parser.advance();
-
-        parser
+impl ErrorReporter {
+    fn new() -> Self {
+        ErrorReporter { errors: RefCell::new(Vec::new()) }
     }
 
-    // fn parse_item(&mut self) -> ParseResult<ast::FnDef> {
-    //     match self.token {
-    //         Token::KeywordFn => self.parse_fn_def(),
-    //         _ => Err(()),
-    //     }
-    // }
-
-    fn parse_module(&mut self) -> ParseResult<ast::Module> {
-        let mut fns = Vec::new();
-
-        while self.token != Token::Eof {
-            fns.push(try!(self.parse_fn_def()));
-        }
-
-        Ok(ast::Module { fns: fns })
+    fn report<S: Into<String>>(&self, span: Span, level: ErrorLevel, message: S) {
+        self.errors.borrow_mut().push(Error {
+            message: message.into(),
+            level: level,
+            span: span,
+        });
     }
 
-    fn parse_fn_def(&mut self) -> ParseResult<ast::FnDef> {
-        try!(self.expect(&Token::KeywordFn));
-
-        let name = match self.advance_and_get() {
-            Token::Ident(name) => name,
-
-            // TODO(tsion): Add an error to self.errors.
-            _ => return Err(()),
-        };
-
-        try!(self.expect(&Token::ParenL));
-
-        // TODO(tsion): Parse arguments.
-
-        try!(self.expect(&Token::ParenR));
-        try!(self.expect(&Token::BraceL));
-
-        let mut body = Vec::new();
-
-        while self.token != Token::BraceR {
-            body.push(try!(self.parse_expr()));
-        }
-
-        // Skip the closing brace.
-        self.advance();
-
-        Ok(ast::FnDef {
-            name: name,
-            return_ty: ast::Type::Unit,
-            args: Vec::new(),
-            body: body,
-        })
-    }
-
-    fn parse_expr(&mut self) -> ParseResult<ast::Expr> {
-        let func = match self.advance_and_get() {
-            Token::Ident(name) => name,
-
-            // TODO(tsion): Add an error to self.errors.
-            _ => return Err(()),
-        };
-
-        try!(self.expect(&Token::ParenL));
-
-        let str = match self.advance_and_get() {
-            Token::StrLit(str) => str,
-
-            // TODO(tsion): Add an error to self.errors.
-            _ => return Err(()),
-        };
-
-        try!(self.expect(&Token::ParenR));
-        try!(self.expect(&Token::Semicolon));
-
-        Ok(ast::Expr::FnCall {
-            func: func,
-            args: vec![ast::Expr::StrLit(str)],
-        })
-    }
-
-    fn expect(&mut self, expected: &Token) -> ParseResult<()> {
-        if self.token == *expected {
-            self.advance();
-            Ok(())
-        } else {
-            // TODO(tsion): Add an error to self.errors.
-            println!("Expected '{:?}', found '{:?}'.", expected, self.token);
-            Err(())
-        }
-    }
-
-    fn advance(&mut self) {
-        mem::swap(&mut self.last_token, &mut self.token);
-        self.token = self.lexer.next_token();
-    }
-
-    fn advance_and_get(&mut self) -> Token {
-        let old_token = mem::replace(&mut self.token, Token::Invalid);
-        self.advance();
-        old_token
+    fn is_empty(&self) -> bool {
+        self.errors.borrow().is_empty()
     }
 }
 
-pub fn load_and_parse<P: AsRef<Path>>(path: P) -> io::Result<Option<ast::Module>> {
-    let mut contents = String::new();
-    let mut file = try!(File::open(path));
-    try!(file.read_to_string(&mut contents));
+pub fn errors() -> Rc<ErrorReporter> {
+    thread_local!(static KEY: Rc<ErrorReporter> = Rc::new(ErrorReporter::new()));
+    KEY.with(|k| k.clone())
+}
 
-    let mut parser = Parser::new(&contents);
-    Ok(parser.parse_module().ok())
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn lex_string() {
+        let mut lexer = Lexer::new(r#""foobar""#);
+        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foobar")));
+
+        let mut lexer = Lexer::new(r#""foobar"#);
+        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foobar")));
+
+        let mut lexer = Lexer::new(r#""foo\nbar""#);
+        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foo\nbar")));
+
+        let mut lexer = Lexer::new(r#""foo\nbar"#);
+        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foo\nbar")));
+
+        let mut lexer = Lexer::new(r#""foo\cbar""#);
+        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foocbar")));
+
+        let errors = errors();
+        println!("{:?}", errors.errors.borrow());
+        panic!();
+    }
 }

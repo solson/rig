@@ -1,9 +1,15 @@
 extern crate rig;
 
 use rig::{parser, trans};
-use std::{env, process};
+use std::{env, io, process};
+use std::fs::File;
+use std::io::prelude::*;
 
 fn main() {
+    result_main().unwrap();
+}
+
+fn result_main() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.len() != 1 {
         println!("Usage: rig INPUT");
@@ -12,14 +18,24 @@ fn main() {
 
     println!("\n---- PARSED ----\n");
 
-    let module = parser::load_and_parse(&args[0]).unwrap().unwrap();
-    println!("{:#?}", module);
+    let mut source = String::new();
 
-    println!("\n---- LLVM'D ----\n");
+    {
+        let mut file = try!(File::open(&args[0]));
+        try!(file.read_to_string(&mut source));
+    }
 
-    let llvm_module = trans::translate_module(&module);
-    llvm_module.dump();
+    // parser::
 
-    trans::write_object_file(&llvm_module, "out.o");
-    println!("\nWrote output to out.o.");
+    // let parser = parser::Parser::new(&source);
+    // let module = parser.parse_module();
+    // println!("{:#?}", module);
+
+    // println!("\n---- LLVM'D ----\n");
+    // let llvm_module = trans::translate_module(&module);
+    // llvm_module.dump();
+    // trans::write_object_file(&llvm_module, "out.o");
+    // println!("\nWrote output to out.o.");
+
+    Ok(())
 }
