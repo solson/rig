@@ -182,7 +182,7 @@ impl<'src> Lexer<'src> {
 
             match c {
                 '\\' => {
-                    let escaped = match self.current { Some(c) => c, None => break };
+                    let escaped = match self.current { Some(c) => c, None => continue };
                     self.advance();
 
                     string.push(match escaped {
