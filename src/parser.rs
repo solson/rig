@@ -193,7 +193,7 @@ impl<'src> Lexer<'src> {
                         c => {
                             errors().report(Span::new(escape_start, self.position),
                                             ErrorLevel::Error,
-                                            format!("invalid character escape: {}", c));
+                                            format!("invalid character escape: {:?}", c));
                             c
                         }
                     });
@@ -476,14 +476,14 @@ mod test {
     #[test]
     fn lex_invalid_escape_string() {
         lexer_test(r#""foo\cbar""#, StrLit(String::from("foocbar")), &[
-            (4, 6, Error, "invalid character escape: c"),
+            (4, 6, Error, "invalid character escape: 'c'"),
         ]);
     }
 
     #[test]
     fn lex_unterminated_invalid_escape_string() {
         lexer_test(r#""foo\cbar"#, StrLit(String::from("foocbar")), &[
-            (4, 6, Error, "invalid character escape: c"),
+            (4, 6, Error, "invalid character escape: 'c'"),
             (9, 9, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
