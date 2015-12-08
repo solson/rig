@@ -211,9 +211,9 @@ impl<'src> Lexer<'src> {
     //     errors().report(Span::new(self.token_start, self.position), message.into());
     // }
 
-    fn peek(&self) -> Option<char> {
-        self.current.and_then(|c| self.char_at(self.position + c.len_utf8()))
-    }
+    // fn peek(&self) -> Option<char> {
+    //     self.current.and_then(|c| self.char_at(self.position + c.len_utf8()))
+    // }
 
     fn char_at(&self, pos: usize) -> Option<char> {
         self.source[pos..].chars().next()
@@ -230,10 +230,10 @@ impl<'src> Lexer<'src> {
     }
 }
 
-pub fn tokenize(source: &str) -> Vec<Token> {
-    let mut lexer = Lexer::new(source);
-    vec![]
-}
+// pub fn tokenize(source: &str) -> Vec<Token> {
+//     let mut lexer = Lexer::new(source);
+//     vec![]
+// }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Parser
