@@ -350,14 +350,14 @@ fn is_ident_continue(c: char) -> bool {
 // Errors
 ////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
     pub message: String,
     pub level: ErrorLevel,
     pub span: Span,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorLevel {
     Error,
     Warning,
@@ -384,6 +384,10 @@ impl ErrorReporter {
     fn is_empty(&self) -> bool {
         self.errors.borrow().is_empty()
     }
+
+    fn reset(&self) {
+        self.errors.borrow_mut().clear();
+    }
 }
 
 pub fn errors() -> Rc<ErrorReporter> {
@@ -393,27 +397,121 @@ pub fn errors() -> Rc<ErrorReporter> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use super::{errors, ErrorLevel, Lexer, Span, TokenKind};
+    use super::ErrorLevel::*;
+    use super::TokenKind::*;
+
+    #[test]
+    fn lex_empty_string() {
+        lexer_test(r#""""#, StrLit(String::from("")), &[]);
+    }
+
+    #[test]
+    fn lex_unterminated_empty_string() {
+        lexer_test(r#"""#, StrLit(String::from("")), &[
+            (1, 1, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
+
+    #[test]
+    fn lex_unterminated_escape_empty_string() {
+        lexer_test(r#""\"#, StrLit(String::from("")), &[
+            (2, 2, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
+
+    #[test]
+    fn lex_unterminated_escape_string() {
+        lexer_test(r#""foo\"#, StrLit(String::from("foo")), &[
+            (5, 5, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
 
     #[test]
     fn lex_string() {
-        let mut lexer = Lexer::new(r#""foobar""#);
-        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foobar")));
+        lexer_test(r#""foobar""#, StrLit(String::from("foobar")), &[]);
+    }
 
-        let mut lexer = Lexer::new(r#""foobar"#);
-        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foobar")));
+    #[test]
+    fn lex_unterminated_string() {
+        lexer_test(r#""foobar"#, StrLit(String::from("foobar")), &[
+            (7, 7, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
 
-        let mut lexer = Lexer::new(r#""foo\nbar""#);
-        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foo\nbar")));
+    #[test]
+    fn lex_string_with_just_newline() {
+        lexer_test(r#""\n""#, StrLit(String::from("\n")), &[]);
+    }
 
-        let mut lexer = Lexer::new(r#""foo\nbar"#);
-        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foo\nbar")));
+    #[test]
+    fn lex_unterminated_string_with_just_newline() {
+        lexer_test(r#""\n"#, StrLit(String::from("\n")), &[
+            (3, 3, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
 
-        let mut lexer = Lexer::new(r#""foo\cbar""#);
-        assert_eq!(lexer.next().kind, TokenKind::StrLit(String::from("foocbar")));
+    #[test]
+    fn lex_string_with_newline() {
+        lexer_test(r#""foo\nbar""#, StrLit(String::from("foo\nbar")), &[]);
+    }
 
-        let errors = errors();
-        println!("{:?}", errors.errors.borrow());
-        panic!();
+    #[test]
+    fn lex_unterminated_string_with_newline() {
+        lexer_test(r#""foo\nbar"#, StrLit(String::from("foo\nbar")), &[
+            (9, 9, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
+
+    #[test]
+    fn lex_invalid_escape_string() {
+        lexer_test(r#""foo\cbar""#, StrLit(String::from("foocbar")), &[
+            (4, 6, Error, "invalid character escape: c"),
+        ]);
+    }
+
+    #[test]
+    fn lex_unterminated_invalid_escape_string() {
+        lexer_test(r#""foo\cbar"#, StrLit(String::from("foocbar")), &[
+            (4, 6, Error, "invalid character escape: c"),
+            (9, 9, Error, "unterminated string literal"),
+            (0, 0, Note, "string literal began here"),
+        ]);
+    }
+
+    fn lexer_test(source: &str,
+                  expected: TokenKind,
+                  expected_errors: &[(usize, usize, ErrorLevel, &str)]) {
+        let mut lexer = Lexer::new(source);
+        assert_eq!(lexer.next().kind, expected);
+        assert_errors(expected_errors);
+    }
+
+    fn assert_errors(expected_errors: &[(usize, usize, ErrorLevel, &str)]) {
+        let reporter = errors();
+
+        {
+            let errors = reporter.errors.borrow();
+
+            for (i, &(start, end, level, message)) in expected_errors.iter().enumerate() {
+                assert_eq!(errors[i], super::Error {
+                    message: String::from(message),
+                    level: level,
+                    span: Span::new(start, end),
+                });
+            }
+
+            // Checking that there are no unexpected errors this way will pretty-print the
+            // unexpected errors if they exist.
+            assert_eq!(&errors[expected_errors.len()..], &[]);
+        }
+
+        reporter.reset();
     }
 }
