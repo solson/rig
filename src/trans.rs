@@ -1,4 +1,4 @@
-use libc::types::os::arch::c95::*;
+use libc;
 
 use llvm_sys::analysis::*;
 use llvm_sys::analysis::LLVMVerifierFailureAction::*;
@@ -64,7 +64,7 @@ pub fn translate_module(ast_module: &ast::Module) -> Module {
         let string_type = LLVMPointerType(LLVMInt8TypeInContext(module.context), 0);
         let mut arg_types = [string_type];
         let puts_type = LLVMFunctionType(i32_type, arg_types.as_mut_ptr(),
-                                         arg_types.len() as c_uint, 0);
+                                         arg_types.len() as libc::c_uint, 0);
         LLVMAddFunction(module.raw, c_str!("puts"), puts_type);
     }
 
@@ -109,7 +109,7 @@ fn translate_expr(expr: &ast::Expr, module: &Module, builder: LLVMBuilderRef) ->
                 unsafe {
                     let func = LLVMGetNamedFunction(module.raw, c_str!("puts"));
                     LLVMBuildCall(builder, func, arg_values.as_mut_ptr(),
-                                  arg_values.len() as c_uint, c_str!(""))
+                                  arg_values.len() as libc::c_uint, c_str!(""))
                 }
             } else {
                 unimplemented!()
@@ -148,7 +148,7 @@ pub fn write_object_file(module: &Module, filename: &str) {
         let result = LLVMTargetMachineEmitToFile(
             target_machine,
             module.raw,
-            filename_cstr.as_ptr() as *mut c_char,
+            filename_cstr.as_ptr() as *mut libc::c_char,
             LLVMCodeGenFileType::LLVMObjectFile,
             &mut error);
 

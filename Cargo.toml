@@ -1,8 +1,8 @@
 [package]
+authors = ["Scott Olson <scott@solson.me>"]
 name = "rig"
 version = "0.1.0"
-authors = ["Scott Olson <scott@solson.me>"]
 
 [dependencies]
-libc = "0.1.10"
+libc = "0.2.2"
 llvm-sys = "0.2.0"
