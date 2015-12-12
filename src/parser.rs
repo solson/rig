@@ -130,6 +130,7 @@ impl<'src> Iterator for Lexer<'src> {
     fn next(&mut self) -> Option<Token> {
         use self::TokenKind::*;
 
+        self.skip_whitespace();
         self.token_start = self.position;
 
         let c = match self.current {
@@ -226,6 +227,13 @@ impl<'src> Lexer<'src> {
         }
 
         string
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(c) = self.current {
+            if !is_whitespace(c) { break; }
+            self.advance();
+        }
     }
 
     // fn report_error<S: Into<String>>(&self, message: S) {
