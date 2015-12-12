@@ -96,7 +96,6 @@ pub enum TokenKind {
     BracketL,
     BracketR,
     Semicolon,
-    Eof,
     Invalid,
 }
 
@@ -125,21 +124,17 @@ pub struct Lexer<'src> {
     current: Option<char>,
 }
 
-impl<'src> Lexer<'src> {
-    pub fn new(source: &'src str) -> Self {
-        let mut lexer = Lexer { source: source, position: 0, token_start: 0, current: None };
-        lexer.current = lexer.char_at(0);
-        lexer
-    }
+impl<'src> Iterator for Lexer<'src> {
+    type Item = Token;
 
-    pub fn next_token(&mut self) -> Token {
+    fn next(&mut self) -> Option<Token> {
         use self::TokenKind::*;
 
         self.token_start = self.position;
 
         let c = match self.current {
             Some(c) => c,
-            None => return Token::new(self.position, self.position, TokenKind::Eof),
+            None => return None,
         };
 
         self.advance();
@@ -156,7 +151,15 @@ impl<'src> Lexer<'src> {
             _ => Invalid,
         };
 
-        Token::new(self.token_start, self.position, kind)
+        Some(Token::new(self.token_start, self.position, kind))
+    }
+}
+
+impl<'src> Lexer<'src> {
+    pub fn new(source: &'src str) -> Self {
+        let mut lexer = Lexer { source: source, position: 0, token_start: 0, current: None };
+        lexer.current = lexer.char_at(0);
+        lexer
     }
 
     /// Lex a string, assuming the initial " has already been consumed.
@@ -226,18 +229,6 @@ impl<'src> Lexer<'src> {
             self.current = self.char_at(self.position);
         } else {
             panic!("lexer attempted to advance past the end of the source code");
-        }
-    }
-}
-
-impl<'src> Iterator for Lexer<'src> {
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Token> {
-        if self.position == self.source.len() {
-            None
-        } else {
-            Some(self.next_token())
         }
     }
 }
@@ -507,7 +498,7 @@ mod test {
         let mut lexer = Lexer::new(source);
 
         for expected_token in expected {
-            assert_eq!(lexer.next_token().kind, expected_token);
+            assert_eq!(lexer.next().unwrap().kind, expected_token);
         }
 
         let extra_tokens: Vec<Token> = lexer.collect();
