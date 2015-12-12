@@ -1,6 +1,6 @@
 extern crate rig;
 
-use rig::{parser, trans};
+use rig::{ast, parser, trans};
 use std::{env, io, process};
 use std::fs::File;
 use std::io::prelude::*;
@@ -32,15 +32,12 @@ fn result_main() -> io::Result<()> {
     let fn_def = parser::parse_fn_def(&tokens);
     println!("{:?}", fn_def);
 
-    // let parser = parser::Parser::new(&source);
-    // let module = parser.parse_module();
-    // println!("{:#?}", module);
-
-    // println!("\n---- LLVM'D ----\n");
-    // let llvm_module = trans::translate_module(&module);
-    // llvm_module.dump();
-    // trans::write_object_file(&llvm_module, "out.o");
-    // println!("\nWrote output to out.o.");
+    println!("\n---- LLVM ----\n");
+    let module = ast::Module { fns: vec![fn_def.unwrap()] };
+    let llvm_module = trans::translate_module(&module);
+    llvm_module.dump();
+    trans::write_object_file(&llvm_module, "out.o");
+    println!("\nWrote output to out.o.");
 
     Ok(())
 }
