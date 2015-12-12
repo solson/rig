@@ -536,6 +536,20 @@ mod test {
         ]);
     }
 
+    #[test]
+    fn lex_hello_world() {
+        lexer_test(
+            include_str!("../examples/hello_world.rig"),
+            vec![sym("fn"), sym("main"), ParenL, ParenR, BraceL, sym("print"), ParenL,
+                 StrLiteral(String::from("Hello, world!")), ParenR, Semicolon, BraceR],
+            &[]
+        );
+    }
+
+    fn sym(s: &str) -> TokenKind {
+        Symbol(interner().intern(s))
+    }
+
     fn lexer_test(source: &str,
                   expected: Vec<TokenKind>,
                   expected_errors: &[(usize, usize, ErrorLevel, &str)]) {
