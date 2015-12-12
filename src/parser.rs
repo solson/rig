@@ -73,7 +73,7 @@ fn interner() -> Rc<StrInterner> {
 // Lexer
 ////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
@@ -132,7 +132,7 @@ impl<'src> Lexer<'src> {
         lexer
     }
 
-    pub fn next(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Token {
         use self::TokenKind::*;
 
         self.token_start = self.position;
@@ -226,6 +226,18 @@ impl<'src> Lexer<'src> {
             self.current = self.char_at(self.position);
         } else {
             panic!("lexer attempted to advance past the end of the source code");
+        }
+    }
+}
+
+impl<'src> Iterator for Lexer<'src> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Token> {
+        if self.position == self.source.len() {
+            None
+        } else {
+            Some(self.next_token())
         }
     }
 }
@@ -401,18 +413,18 @@ pub fn errors() -> Rc<ErrorReporter> {
 
 #[cfg(test)]
 mod test {
-    use super::{errors, ErrorLevel, Lexer, Span, TokenKind};
+    use super::{errors, ErrorLevel, Lexer, Span, Token, TokenKind};
     use super::ErrorLevel::*;
     use super::TokenKind::*;
 
     #[test]
     fn lex_empty_string() {
-        lexer_test(r#""""#, StrLit(String::from("")), &[]);
+        lexer_test(r#""""#, vec![StrLit(String::from(""))], &[]);
     }
 
     #[test]
     fn lex_unterminated_empty_string() {
-        lexer_test(r#"""#, StrLit(String::from("")), &[
+        lexer_test(r#"""#, vec![StrLit(String::from(""))], &[
             (1, 1, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
@@ -420,7 +432,7 @@ mod test {
 
     #[test]
     fn lex_unterminated_escape_empty_string() {
-        lexer_test(r#""\"#, StrLit(String::from("")), &[
+        lexer_test(r#""\"#, vec![StrLit(String::from(""))], &[
             (2, 2, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
@@ -428,7 +440,7 @@ mod test {
 
     #[test]
     fn lex_unterminated_escape_string() {
-        lexer_test(r#""foo\"#, StrLit(String::from("foo")), &[
+        lexer_test(r#""foo\"#, vec![StrLit(String::from("foo"))], &[
             (5, 5, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
@@ -436,12 +448,12 @@ mod test {
 
     #[test]
     fn lex_string() {
-        lexer_test(r#""foobar""#, StrLit(String::from("foobar")), &[]);
+        lexer_test(r#""foobar""#, vec![StrLit(String::from("foobar"))], &[]);
     }
 
     #[test]
     fn lex_unterminated_string() {
-        lexer_test(r#""foobar"#, StrLit(String::from("foobar")), &[
+        lexer_test(r#""foobar"#, vec![StrLit(String::from("foobar"))], &[
             (7, 7, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
@@ -449,12 +461,12 @@ mod test {
 
     #[test]
     fn lex_string_with_just_newline() {
-        lexer_test(r#""\n""#, StrLit(String::from("\n")), &[]);
+        lexer_test(r#""\n""#, vec![StrLit(String::from("\n"))], &[]);
     }
 
     #[test]
     fn lex_unterminated_string_with_just_newline() {
-        lexer_test(r#""\n"#, StrLit(String::from("\n")), &[
+        lexer_test(r#""\n"#, vec![StrLit(String::from("\n"))], &[
             (3, 3, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
@@ -462,12 +474,12 @@ mod test {
 
     #[test]
     fn lex_string_with_newline() {
-        lexer_test(r#""foo\nbar""#, StrLit(String::from("foo\nbar")), &[]);
+        lexer_test(r#""foo\nbar""#, vec![StrLit(String::from("foo\nbar"))], &[]);
     }
 
     #[test]
     fn lex_unterminated_string_with_newline() {
-        lexer_test(r#""foo\nbar"#, StrLit(String::from("foo\nbar")), &[
+        lexer_test(r#""foo\nbar"#, vec![StrLit(String::from("foo\nbar"))], &[
             (9, 9, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
         ]);
@@ -475,14 +487,14 @@ mod test {
 
     #[test]
     fn lex_invalid_escape_string() {
-        lexer_test(r#""foo\cbar""#, StrLit(String::from("foocbar")), &[
+        lexer_test(r#""foo\cbar""#, vec![StrLit(String::from("foocbar"))], &[
             (4, 6, Error, "invalid character escape: 'c'"),
         ]);
     }
 
     #[test]
     fn lex_unterminated_invalid_escape_string() {
-        lexer_test(r#""foo\cbar"#, StrLit(String::from("foocbar")), &[
+        lexer_test(r#""foo\cbar"#, vec![StrLit(String::from("foocbar"))], &[
             (4, 6, Error, "invalid character escape: 'c'"),
             (9, 9, Error, "unterminated string literal"),
             (0, 0, Note, "string literal began here"),
@@ -490,10 +502,17 @@ mod test {
     }
 
     fn lexer_test(source: &str,
-                  expected: TokenKind,
+                  expected: Vec<TokenKind>,
                   expected_errors: &[(usize, usize, ErrorLevel, &str)]) {
         let mut lexer = Lexer::new(source);
-        assert_eq!(lexer.next().kind, expected);
+
+        for expected_token in expected {
+            assert_eq!(lexer.next_token().kind, expected_token);
+        }
+
+        let extra_tokens: Vec<Token> = lexer.collect();
+        assert_eq!(extra_tokens, &[]);
+
         assert_errors(expected_errors);
     }
 
