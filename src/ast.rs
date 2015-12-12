@@ -1,5 +1,7 @@
 //! Abstract syntax tree.
 
+use parser;
+
 #[derive(Clone, Debug)]
 pub struct Module {
     pub fns: Vec<FnDef>,
@@ -18,7 +20,7 @@ pub enum Type {
 
 #[derive(Clone, Debug)]
 pub struct FnDef {
-    pub name: String,
+    pub name: parser::Name,
     pub return_ty: Type,
     pub args: Vec<VarDef>,
     pub body: Vec<Expr>,
@@ -27,7 +29,7 @@ pub struct FnDef {
 #[derive(Clone, Debug)]
 pub enum Expr {
     FnCall {
-        func: String,
+        func: parser::Name,
         args: Vec<Expr>,
     },
 

@@ -4,6 +4,7 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
+use std::ops::Deref;
 use std::rc::Rc;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -13,8 +14,16 @@ use std::rc::Rc;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Name(u32);
 
+impl Name {
+    pub fn as_str(self) -> RcString {
+        let interner = interner();
+        let vec = interner.vec.borrow();
+        vec[self.0 as usize].clone()
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct RcString(Rc<String>);
+pub struct RcString(Rc<String>);
 
 impl From<String> for RcString {
     fn from(s: String) -> Self {
@@ -25,6 +34,14 @@ impl From<String> for RcString {
 impl<'a> From<&'a str> for RcString {
     fn from(s: &str) -> Self {
         RcString::from(String::from(s))
+    }
+}
+
+impl Deref for RcString {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
     }
 }
 
@@ -267,11 +284,52 @@ pub fn tokenize(source: &str) -> Vec<Token> {
 // Parser
 ////////////////////////////////////////////////////////////////////////////////
 
-// #[derive(Clone, Debug)]
-// struct Parser<'src> {
-//     lexer: Lexer<'src>,
-//     errors: Vec<Error>,
-// }
+pub fn parse_fn_def(tokens: &[Token]) -> Result<ast::FnDef, ()> {
+    use self::TokenKind::*;
+
+    if tokens[0].kind != Symbol(interner().intern("fn")) {
+        return Err(());
+    }
+
+    let name = match tokens[1].kind {
+        Symbol(name) => name,
+        _ => {
+            errors().report(tokens[1].span,
+                            ErrorLevel::Error,
+                            "expected identifier for fn name");
+            return Err(());
+        }
+    };
+
+    if tokens[2].kind != ParenL { return Err(()); }
+
+    // TODO(tsion): Parse arguments.
+
+    if tokens[3].kind != ParenR { return Err(()); }
+    if tokens[4].kind != BraceL { return Err(()); }
+
+    let mut body = Vec::new();
+    let mut pos = 5;
+
+    while tokens[pos].kind != BraceR {
+        // body.push(try!(self.parse_expr()));
+        pos += 1;
+    }
+
+    // Skip the closing brace.
+    pos += 1;
+
+    Ok(ast::FnDef {
+        name: name,
+        return_ty: ast::Type::Unit,
+        args: Vec::new(),
+        body: body,
+    })
+}
+
+    // #[derive(Clone, Debug)]
+    // struct Parser {
+    // }
 
     // fn parse_module(&mut self) -> ParseResult<ast::Module> {
     //     let mut fns = Vec::new();
@@ -279,40 +337,6 @@ pub fn tokenize(source: &str) -> Vec<Token> {
     //         fns.push(try!(self.parse_fn_def()));
     //     }
     //     Ok(ast::Module { fns: fns })
-    // }
-
-    // fn parse_fn_def(&mut self) -> ParseResult<ast::FnDef> {
-    //     try!(self.expect(&Token::KeywordFn));
-
-    //     let name = match self.advance_and_get() {
-    //         Token::Ident(name) => name,
-
-    //         // TODO(tsion): Add an error to self.errors.
-    //         _ => return Err(()),
-    //     };
-
-    //     try!(self.expect(&Token::ParenL));
-
-    //     // TODO(tsion): Parse arguments.
-
-    //     try!(self.expect(&Token::ParenR));
-    //     try!(self.expect(&Token::BraceL));
-
-    //     let mut body = Vec::new();
-
-    //     while self.token != Token::BraceR {
-    //         body.push(try!(self.parse_expr()));
-    //     }
-
-    //     // Skip the closing brace.
-    //     self.advance();
-
-    //     Ok(ast::FnDef {
-    //         name: name,
-    //         return_ty: ast::Type::Unit,
-    //         args: Vec::new(),
-    //         body: body,
-    //     })
     // }
 
     // fn parse_expr(&mut self) -> ParseResult<ast::Expr> {

@@ -24,17 +24,13 @@ fn result_main() -> io::Result<()> {
     }
 
     println!("\n---- Tokens ----\n");
-
-    let token_kinds: Vec<parser::TokenKind> = parser::tokenize(&source)
-        .into_iter()
-        .map(|t| t.kind)
-        .collect();
-
+    let tokens = parser::tokenize(&source);
+    let token_kinds: Vec<&parser::TokenKind> = tokens.iter().map(|t| &t.kind).collect();
     println!("{:?}", token_kinds);
 
     println!("\n---- Parse tree ----\n");
-
-    // parser::
+    let fn_def = parser::parse_fn_def(&tokens);
+    println!("{:?}", fn_def);
 
     // let parser = parser::Parser::new(&source);
     // let module = parser.parse_module();
