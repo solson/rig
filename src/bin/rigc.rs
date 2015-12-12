@@ -16,14 +16,23 @@ fn result_main() -> io::Result<()> {
         process::exit(1);
     }
 
-    println!("\n---- PARSED ----\n");
-
     let mut source = String::new();
 
     {
         let mut file = try!(File::open(&args[0]));
         try!(file.read_to_string(&mut source));
     }
+
+    println!("\n---- Tokens ----\n");
+
+    let token_kinds: Vec<parser::TokenKind> = parser::tokenize(&source)
+        .into_iter()
+        .map(|t| t.kind)
+        .collect();
+
+    println!("{:?}", token_kinds);
+
+    println!("\n---- Parse tree ----\n");
 
     // parser::
 

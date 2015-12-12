@@ -259,10 +259,9 @@ impl<'src> Lexer<'src> {
     }
 }
 
-// pub fn tokenize(source: &str) -> Vec<Token> {
-//     let mut lexer = Lexer::new(source);
-//     vec![]
-// }
+pub fn tokenize(source: &str) -> Vec<Token> {
+    Lexer::new(source).collect()
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Parser
