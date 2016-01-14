@@ -20,7 +20,7 @@ pub enum Type {
 
 #[derive(Clone, Debug)]
 pub struct FnDef {
-    pub name: parser::Name,
+    pub name: parser::Symbol,
     pub return_ty: Type,
     pub args: Vec<VarDef>,
     pub body: Vec<Expr>,
@@ -29,7 +29,7 @@ pub struct FnDef {
 #[derive(Clone, Debug)]
 pub enum Expr {
     FnCall {
-        func: parser::Name,
+        func: parser::Symbol,
         args: Vec<Expr>,
     },
 

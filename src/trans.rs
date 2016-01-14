@@ -79,7 +79,8 @@ pub fn translate_fn_def(module: &mut Module, fn_def: &ast::FnDef) {
     unsafe {
         let i32_type = LLVMInt32TypeInContext(module.context);
         let func_type = LLVMFunctionType(i32_type, ptr::null_mut(), 0, 0);
-        let func_name = CString::new(fn_def.name.as_str().as_bytes().to_owned()).unwrap();
+
+        let func_name = fn_def.name.with(|name| CString::new(name.as_bytes().to_owned()).unwrap());
         let func = LLVMAddFunction(module.raw, func_name.as_ptr(), func_type);
 
         let bb = LLVMAppendBasicBlockInContext(module.context, func, c_str!("entry"));
@@ -105,7 +106,7 @@ fn translate_expr(expr: &ast::Expr, module: &Module, builder: LLVMBuilderRef) ->
                 .map(|arg| translate_expr(arg, module, builder))
                 .collect();
 
-            if &func.as_str()[..] == "print" {
+            if func.with(|name| name == "print") {
                 unsafe {
                     let func = LLVMGetNamedFunction(module.raw, c_str!("puts"));
                     LLVMBuildCall(builder, func, arg_values.as_mut_ptr(),

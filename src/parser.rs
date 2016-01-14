@@ -1,89 +1,94 @@
 use ast;
-use std::{io, mem};
+use str_arena::StrArena;
+
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fs::File;
-use std::ops::Deref;
+use std::fmt::{self, Debug, Formatter};
+use std::marker::PhantomData;
+use std::mem;
 use std::rc::Rc;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Interned strings
 ////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Name(u32);
+/// An interned string, represented as an index into a thread-local string interner.
+#[allow(raw_pointer_derive)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+pub struct Symbol {
+    index: u32,
 
-impl Name {
-    pub fn as_str(self) -> RcString {
-        let interner = interner();
-        let vec = interner.vec.borrow();
-        vec[self.0 as usize].clone()
+    // Disable Send and Sync using a marker type.
+    _marker: PhantomData<*const ()>,
+}
+
+impl Debug for Symbol {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        self.with(|name| write!(f, "{:?}:{}", name, self.index))
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct RcString(Rc<String>);
+impl Symbol {
+    fn new(index: u32) -> Symbol {
+        Symbol { index: index, _marker: PhantomData }
+    }
 
-impl From<String> for RcString {
-    fn from(s: String) -> Self {
-        RcString(Rc::new(s))
+    pub fn with<F, R>(self, f: F) -> R where F: FnOnce(&str) -> R {
+        INTERNER.with(|interner| {
+            let string = interner.borrow().sym_to_str[self.index as usize];
+            f(string)
+        })
     }
 }
 
-impl<'a> From<&'a str> for RcString {
-    fn from(s: &str) -> Self {
-        RcString::from(String::from(s))
-    }
-}
-
-impl Deref for RcString {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Borrow<str> for RcString {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
+#[allow(raw_pointer_derive)]
 #[derive(Debug)]
-struct StrInterner {
-    map: RefCell<HashMap<RcString, Name>>,
-    vec: RefCell<Vec<RcString>>,
+struct Interner {
+    arena: StrArena,
+    str_to_sym: HashMap<&'static str, Symbol>,
+    sym_to_str: Vec<&'static str>,
+
+    // Disable Send and Sync using a marker type.
+    _marker: PhantomData<*const ()>,
 }
 
-impl StrInterner {
+impl Interner {
     fn new() -> Self {
-        StrInterner {
-            map: RefCell::new(HashMap::new()),
-            vec: RefCell::new(Vec::new()),
+        Interner {
+            arena: StrArena::new(),
+            str_to_sym: HashMap::new(),
+            sym_to_str: Vec::new(),
+            _marker: PhantomData,
         }
     }
 
-    fn intern(&self, string: &str) -> Name {
-        let mut map = self.map.borrow_mut();
-        let mut vec = self.vec.borrow_mut();
-
-        if let Some(&idx) = map.get(string) {
-            return idx;
+    fn intern(&mut self, string: &str) -> Symbol {
+        if let Some(&sym) = self.str_to_sym.get(string) {
+            return sym;
         }
 
-        let new_idx = Name(vec.len() as u32);
-        let rc_str = RcString::from(string);
-        map.insert(rc_str.clone(), new_idx);
-        vec.push(rc_str);
-        new_idx
+        let new_sym = Symbol::new(self.sym_to_str.len() as u32);
+        let arena_str = self.arena.allocate(string);
+
+        // Extend the lifetime of the slice pointer into the arena to the static lifetime. This is
+        // safe because these static references never escape the interner, and dropping
+        // `str_to_sym` and `sym_to_str` doesn't cause any reads of the slices (in case the arena
+        // is dropped first).
+        let arena_str = unsafe { mem::transmute::<&str, &'static str>(arena_str) };
+
+        self.str_to_sym.insert(arena_str, new_sym);
+        self.sym_to_str.push(arena_str);
+        new_sym
     }
 }
 
-fn interner() -> Rc<StrInterner> {
-    thread_local!(static KEY: Rc<StrInterner> = Rc::new(StrInterner::new()));
-    KEY.with(|k| k.clone())
+thread_local!(static INTERNER: RefCell<Interner> = RefCell::new(Interner::new()));
+
+pub fn intern(string: &str) -> Symbol {
+    INTERNER.with(|interner| {
+        interner.borrow_mut().intern(string)
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -104,7 +109,7 @@ impl Token {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
-    Symbol(Name),
+    Symbol(Symbol),
     StrLiteral(String),
     ParenL,
     ParenR,
@@ -189,13 +194,13 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lex a symbol, i.e. an identifier or keyword.
-    fn lex_symbol(&mut self) -> Name {
+    fn lex_symbol(&mut self) -> Symbol {
         while let Some(c) = self.current {
             if !is_ident_continue(c) { break; }
             self.advance();
         }
 
-        interner().intern(&self.source[self.token_start..self.position])
+        intern(&self.source[self.token_start..self.position])
     }
 
     /// Lex a string, assuming the initial " has already been consumed.
@@ -287,7 +292,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
 pub fn parse_fn_def(tokens: &[Token]) -> Result<ast::FnDef, ()> {
     use self::TokenKind::*;
 
-    if tokens[0].kind != Symbol(interner().intern("fn")) {
+    if tokens[0].kind != Symbol(intern("fn")) {
         return Err(());
     }
 
@@ -442,6 +447,7 @@ impl ErrorReporter {
     }
 }
 
+// TODO(tsion): Get rid of this Rc.
 pub fn errors() -> Rc<ErrorReporter> {
     thread_local!(static KEY: Rc<ErrorReporter> = Rc::new(ErrorReporter::new()));
     KEY.with(|k| k.clone())
@@ -453,7 +459,7 @@ pub fn errors() -> Rc<ErrorReporter> {
 
 #[cfg(test)]
 mod test {
-    use super::{errors, ErrorLevel, interner, Lexer, Span, Token, TokenKind};
+    use super::{errors, ErrorLevel, intern, Lexer, Span, Token, TokenKind};
     use super::ErrorLevel::*;
     use super::TokenKind::*;
 
@@ -570,7 +576,7 @@ mod test {
     }
 
     fn sym(s: &str) -> TokenKind {
-        Symbol(interner().intern(s))
+        Symbol(intern(s))
     }
 
     fn lexer_test(source: &str,
