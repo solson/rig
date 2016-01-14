@@ -1,6 +1,6 @@
 //! Abstract syntax tree.
 
-use parser;
+use intern::Symbol;
 
 #[derive(Clone, Debug)]
 pub struct Module {
@@ -20,7 +20,7 @@ pub enum Type {
 
 #[derive(Clone, Debug)]
 pub struct FnDef {
-    pub name: parser::Symbol,
+    pub name: Symbol,
     pub return_ty: Type,
     pub args: Vec<VarDef>,
     pub body: Vec<Expr>,
@@ -29,7 +29,7 @@ pub struct FnDef {
 #[derive(Clone, Debug)]
 pub enum Expr {
     FnCall {
-        func: parser::Symbol,
+        func: Symbol,
         args: Vec<Expr>,
     },
 
