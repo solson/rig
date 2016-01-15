@@ -6,19 +6,6 @@ use std::fmt::{self, Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem;
 
-/// The main entry point to the interner.
-pub fn intern(string: &str) -> Symbol {
-    INTERNER.with(|interner| {
-        interner.borrow_mut().intern(string)
-    })
-}
-
-thread_local!(static INTERNER: RefCell<Interner> = RefCell::new(Interner::new()));
-
-////////////////////////////////////////////////////////////////////////////////
-// Interned strings
-////////////////////////////////////////////////////////////////////////////////
-
 /// An interned string, represented as an index into a thread-local string interner.
 #[allow(raw_pointer_derive)]
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -29,15 +16,16 @@ pub struct Symbol {
     _marker: PhantomData<*const ()>,
 }
 
-impl Debug for Symbol {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        self.with(|name| write!(f, "{:?}:{}", name, self.index))
-    }
-}
-
 impl Symbol {
     fn new(index: u32) -> Symbol {
         Symbol { index: index, _marker: PhantomData }
+    }
+
+    /// The main entry point to the interner.
+    pub fn intern(string: &str) -> Symbol {
+        INTERNER.with(|interner| {
+            interner.borrow_mut().intern(string)
+        })
     }
 
     pub fn with<F, R>(self, f: F) -> R where F: FnOnce(&str) -> R {
@@ -47,6 +35,14 @@ impl Symbol {
         })
     }
 }
+
+impl Debug for Symbol {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        self.with(|name| write!(f, "{:?}:{}", name, self.index))
+    }
+}
+
+thread_local!(static INTERNER: RefCell<Interner> = RefCell::new(Interner::new()));
 
 #[allow(raw_pointer_derive)]
 #[derive(Debug)]

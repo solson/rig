@@ -1,5 +1,5 @@
 use ast;
-use intern::{intern, Symbol};
+use intern::Symbol;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,7 +22,7 @@ impl Token {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
-    Symbol(Symbol),
+    Ident(Symbol),
     StrLiteral(String),
     ParenL,
     ParenR,
@@ -74,7 +74,7 @@ impl<'src> Iterator for Lexer<'src> {
         };
 
         let kind = if is_ident_start(c) {
-            Symbol(self.lex_symbol())
+            Ident(self.lex_ident())
         } else {
             self.advance();
             match c {
@@ -106,14 +106,14 @@ impl<'src> Lexer<'src> {
         lexer
     }
 
-    /// Lex a symbol, i.e. an identifier or keyword.
-    fn lex_symbol(&mut self) -> Symbol {
+    /// Lex an identifier (including keywords).
+    fn lex_ident(&mut self) -> Symbol {
         while let Some(c) = self.current {
             if !is_ident_continue(c) { break; }
             self.advance();
         }
 
-        intern(&self.source[self.token_start..self.position])
+        Symbol::intern(&self.source[self.token_start..self.position])
     }
 
     /// Lex a string, assuming the initial " has already been consumed.
@@ -205,12 +205,12 @@ pub fn tokenize(source: &str) -> Vec<Token> {
 pub fn parse_fn_def(tokens: &[Token]) -> Result<ast::FnDef, ()> {
     use self::TokenKind::*;
 
-    if tokens[0].kind != Symbol(intern("fn")) {
+    if tokens[0].kind != Ident(Symbol::intern("fn")) {
         return Err(());
     }
 
     let name = match tokens[1].kind {
-        Symbol(name) => name,
+        Ident(name) => name,
         _ => {
             errors().report(tokens[1].span,
                             ErrorLevel::Error,
@@ -372,7 +372,7 @@ pub fn errors() -> Rc<ErrorReporter> {
 
 #[cfg(test)]
 mod test {
-    use intern::intern;
+    use intern::Symbol;
     use super::{errors, ErrorLevel, Lexer, Span, Token, TokenKind};
     use super::ErrorLevel::*;
     use super::TokenKind::*;
@@ -490,7 +490,7 @@ mod test {
     }
 
     fn sym(s: &str) -> TokenKind {
-        Symbol(intern(s))
+        Ident(Symbol::intern(s))
     }
 
     fn lexer_test(source: &str,
