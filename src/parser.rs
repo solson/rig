@@ -1,8 +1,9 @@
 use ast;
 use intern::Symbol;
+use self::ErrorLevel::*;
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::ops::Range;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Lexer
@@ -42,12 +43,20 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn new(start: usize, end: usize) -> Self {
+    fn new(start: usize, end: usize) -> Span {
         Span { start: start, end: end }
     }
+}
 
-    pub fn point(pos: usize) -> Self {
-        Span { start: pos, end: pos }
+impl From<Range<usize>> for Span {
+    fn from(range: Range<usize>) -> Self {
+        Span::new(range.start, range.end)
+    }
+}
+
+impl From<usize> for Span {
+    fn from(pos: usize) -> Self {
+        Span::new(pos, pos)
     }
 }
 
@@ -87,9 +96,7 @@ impl<'src> Iterator for Lexer<'src> {
                 ']' => BracketR,
                 ';' => Semicolon,
                 _ => {
-                    errors().report(Span::new(self.token_start, self.position),
-                                    ErrorLevel::Error,
-                                    "invalid source character");
+                    report(Error, self.token_start..self.position, "invalid source character");
                     Invalid
                 }
             }
@@ -124,12 +131,9 @@ impl<'src> Lexer<'src> {
             let c = match self.current {
                 Some(c) => c,
                 None => {
-                    errors().report(Span::point(self.position),
-                                    ErrorLevel::Error,
-                                    "unterminated string literal");
-                    errors().report(Span::point(self.token_start),
-                                    ErrorLevel::Note,
-                                    "string literal began here");
+                    report_with_notes(Error, self.position, "unterminated string literal", vec![
+                        note(self.token_start, "string literal began here"),
+                    ]);
                     break;
                 }
             };
@@ -148,9 +152,8 @@ impl<'src> Lexer<'src> {
                         'r' => '\r',
                         't' => '\t',
                         c => {
-                            errors().report(Span::new(escape_start, self.position),
-                                            ErrorLevel::Error,
-                                            format!("invalid character escape: {:?}", c));
+                            report(Error, escape_start..self.position,
+                                   format!("invalid character escape: {:?}", c));
                             c
                         }
                     });
@@ -170,14 +173,6 @@ impl<'src> Lexer<'src> {
             self.advance();
         }
     }
-
-    // fn report_error<S: Into<String>>(&self, message: S) {
-    //     errors().report(Span::new(self.token_start, self.position), message.into());
-    // }
-
-    // fn peek(&self) -> Option<char> {
-    //     self.current.and_then(|c| self.char_at(self.position + c.len_utf8()))
-    // }
 
     fn char_at(&self, pos: usize) -> Option<char> {
         self.source[pos..].chars().next()
@@ -212,9 +207,7 @@ pub fn parse_fn_def(tokens: &[Token]) -> Result<ast::FnDef, ()> {
     let name = match tokens[1].kind {
         Ident(name) => name,
         _ => {
-            errors().report(tokens[1].span,
-                            ErrorLevel::Error,
-                            "expected identifier for fn name");
+            report(Error, tokens[1].span, "expected identifier for fn name");
             return Err(());
         }
     };
@@ -320,50 +313,76 @@ fn is_ident_continue(c: char) -> bool {
 // Errors
 ////////////////////////////////////////////////////////////////////////////////
 
+#[must_use]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Error {
-    pub message: String,
+pub struct ErrorReport {
     pub level: ErrorLevel,
+    pub main_note: ErrorNote,
+    pub extra_notes: Vec<ErrorNote>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ErrorNote {
     pub span: Span,
+    pub message: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorLevel {
     Error,
     Warning,
-    Note,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ErrorReporter {
-    pub errors: RefCell<Vec<Error>>,
+    pub errors: Vec<ErrorReport>,
 }
 
 impl ErrorReporter {
-    fn new() -> Self {
-        ErrorReporter { errors: RefCell::new(Vec::new()) }
+    pub fn new() -> Self {
+        ErrorReporter { errors: Vec::new() }
     }
 
-    fn report<S: Into<String>>(&self, span: Span, level: ErrorLevel, message: S) {
-        self.errors.borrow_mut().push(Error {
-            message: message.into(),
-            level: level,
-            span: span,
-        });
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
     }
 
-    fn is_empty(&self) -> bool {
-        self.errors.borrow().is_empty()
-    }
-
-    fn reset(&self) {
-        self.errors.borrow_mut().clear();
+    pub fn reset(&mut self) {
+        self.errors.clear();
     }
 }
 
-// TODO(tsion): Get rid of this Rc.
-pub fn errors() -> Rc<ErrorReporter> {
-    thread_local!(static KEY: Rc<ErrorReporter> = Rc::new(ErrorReporter::new()));
-    KEY.with(|k| k.clone())
+thread_local!(static ERROR_REPORTER: RefCell<ErrorReporter> = RefCell::new(ErrorReporter::new()));
+
+impl ErrorReport {
+    pub fn new<S, T>(level: ErrorLevel, span: S, message: T, notes: Vec<ErrorNote>) -> Self
+            where S: Into<Span>, T: Into<String> {
+        ErrorReport {
+            level: level,
+            main_note: ErrorNote {
+                span: span.into(),
+                message: message.into(),
+            },
+            extra_notes: notes,
+        }
+    }
+
+    pub fn report(self) {
+        ERROR_REPORTER.with(|reporter| reporter.borrow_mut().errors.push(self));
+    }
+}
+
+pub fn report<S, T>(level: ErrorLevel, span: S, message: T) where S: Into<Span>, T: Into<String> {
+    ErrorReport::new(level, span.into(), message.into(), Vec::new()).report()
+}
+
+pub fn report_with_notes<S, T>(level: ErrorLevel, span: S, message: T, notes: Vec<ErrorNote>)
+        where S: Into<Span>, T: Into<String> {
+    ErrorReport::new(level, span.into(), message.into(), notes).report()
+}
+
+pub fn note<S, T>(span: S, message: T) -> ErrorNote where S: Into<Span>, T: Into<String> {
+    ErrorNote { span: span.into(), message: message.into() }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -373,7 +392,7 @@ pub fn errors() -> Rc<ErrorReporter> {
 #[cfg(test)]
 mod test {
     use intern::Symbol;
-    use super::{errors, ErrorLevel, Lexer, Span, Token, TokenKind};
+    use super::{ERROR_REPORTER, ErrorReport, ErrorLevel, ErrorNote, Lexer, Span, Token, TokenKind, note};
     use super::ErrorLevel::*;
     use super::TokenKind::*;
 
@@ -391,7 +410,7 @@ mod test {
     #[test]
     fn lex_invalid() {
         lexer_test("@", vec![Invalid], &[
-            (0, 1, Error, "invalid source character"),
+            err(Error, 0..1, "invalid source character", &[])
         ]);
     }
 
@@ -403,24 +422,21 @@ mod test {
     #[test]
     fn lex_unterminated_empty_string() {
         lexer_test(r#"""#, vec![str("")], &[
-            (1, 1, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 1, "unterminated string literal", &[note(0, "string literal began here")]),
         ]);
     }
 
     #[test]
     fn lex_unterminated_escape_empty_string() {
         lexer_test(r#""\"#, vec![str("")], &[
-            (2, 2, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 2, "unterminated string literal", &[note(0 , "string literal began here")]),
         ]);
     }
 
     #[test]
     fn lex_unterminated_escape_string() {
         lexer_test(r#""foo\"#, vec![str("foo")], &[
-            (5, 5, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 5, "unterminated string literal", &[note(0 , "string literal began here")]),
         ]);
     }
 
@@ -432,8 +448,7 @@ mod test {
     #[test]
     fn lex_unterminated_string() {
         lexer_test(r#""foobar"#, vec![str("foobar")], &[
-            (7, 7, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 7, "unterminated string literal", &[note(0 , "string literal began here")]),
         ]);
     }
 
@@ -445,8 +460,7 @@ mod test {
     #[test]
     fn lex_unterminated_string_with_just_newline() {
         lexer_test(r#""\n"#, vec![str("\n")], &[
-            (3, 3, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 3, "unterminated string literal", &[note(0 , "string literal began here")]),
         ]);
     }
 
@@ -458,24 +472,22 @@ mod test {
     #[test]
     fn lex_unterminated_string_with_newline() {
         lexer_test(r#""foo\nbar"#, vec![str("foo\nbar")], &[
-            (9, 9, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 9, "unterminated string literal", &[note(0 , "string literal began here")]),
         ]);
     }
 
     #[test]
     fn lex_invalid_escape_string() {
         lexer_test(r#""foo\cbar""#, vec![str("foocbar")], &[
-            (4, 6, Error, "invalid character escape: 'c'"),
+            err(Error, 4..6, "invalid character escape: 'c'", &[]),
         ]);
     }
 
     #[test]
     fn lex_unterminated_invalid_escape_string() {
         lexer_test(r#""foo\cbar"#, vec![str("foocbar")], &[
-            (4, 6, Error, "invalid character escape: 'c'"),
-            (9, 9, Error, "unterminated string literal"),
-            (0, 0, Note, "string literal began here"),
+            err(Error, 4..6, "invalid character escape: 'c'", &[]),
+            err(Error, 9, "unterminated string literal", &[note(0 , "string literal began here")]),
         ]);
     }
 
@@ -489,6 +501,10 @@ mod test {
         );
     }
 
+    ////////////////////////////////////////////////////////////////////////////////
+    // Helper functions
+    ////////////////////////////////////////////////////////////////////////////////
+
     fn sym(s: &str) -> TokenKind {
         Ident(Symbol::intern(s))
     }
@@ -497,9 +513,12 @@ mod test {
         StringLit(Symbol::intern(s))
     }
 
-    fn lexer_test(source: &str,
-                  expected: Vec<TokenKind>,
-                  expected_errors: &[(usize, usize, ErrorLevel, &str)]) {
+    fn err<S, T>(level: ErrorLevel, span: S, message: T, notes: &[ErrorNote]) -> ErrorReport
+            where S: Into<Span>, T: Into<String> {
+        ErrorReport::new(level, span.into(), message.into(), Vec::from(notes))
+    }
+
+    fn lexer_test(source: &str, expected: Vec<TokenKind>, expected_errors: &[ErrorReport]) {
         let mut lexer = Lexer::new(source);
 
         for expected_token in expected {
@@ -509,28 +528,19 @@ mod test {
         let extra_tokens: Vec<Token> = lexer.collect();
         assert_eq!(extra_tokens, &[]);
 
-        assert_errors(expected_errors);
-    }
+        ERROR_REPORTER.with(|reporter| {
+            let mut r = reporter.borrow_mut();
 
-    fn assert_errors(expected_errors: &[(usize, usize, ErrorLevel, &str)]) {
-        let reporter = errors();
-
-        {
-            let errors = reporter.errors.borrow();
-
-            for (i, &(start, end, level, message)) in expected_errors.iter().enumerate() {
-                assert_eq!(errors[i], super::Error {
-                    message: String::from(message),
-                    level: level,
-                    span: Span::new(start, end),
-                });
+            for expected_error in expected_errors {
+                match r.errors.iter().position(|e| e == expected_error) {
+                    Some(i) => { let _ = r.errors.remove(i); },
+                    None => panic!("expected error not found: {:?}", expected_error),
+                }
             }
 
-            // Checking that there are no unexpected errors this way will pretty-print the
-            // unexpected errors if they exist.
-            assert_eq!(&errors[expected_errors.len()..], &[]);
-        }
-
-        reporter.reset();
+            if !r.errors.is_empty() {
+                panic!("unexpected errors: {:?}", r.errors);
+            }
+        });
     }
 }
