@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use std::mem;
 
 /// An interned string, represented as an index into a thread-local string interner.
-#[allow(raw_pointer_derive)]
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct Symbol {
     index: u32,
@@ -44,7 +43,6 @@ impl Debug for Symbol {
 
 thread_local!(static INTERNER: RefCell<Interner> = RefCell::new(Interner::new()));
 
-#[allow(raw_pointer_derive)]
 #[derive(Debug)]
 struct Interner {
     arena: StrArena,
