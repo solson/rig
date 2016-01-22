@@ -1,8 +1,8 @@
 use ast;
+use error;
+use error::Level::*;
 use intern::Symbol;
-use self::ErrorLevel::*;
 
-use std::cell::RefCell;
 use std::ops::Range;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -96,7 +96,8 @@ impl<'src> Iterator for Lexer<'src> {
                 ']' => BracketR,
                 ';' => Semicolon,
                 _ => {
-                    report(Error, self.token_start..self.position, "invalid source character");
+                    error::report(Error, self.token_start..self.position,
+                                  "invalid source character");
                     Invalid
                 }
             }
@@ -131,8 +132,9 @@ impl<'src> Lexer<'src> {
             let c = match self.current {
                 Some(c) => c,
                 None => {
-                    report_with_notes(Error, self.position, "unterminated string literal", vec![
-                        note(self.token_start, "string literal began here"),
+                    error::report_with_notes(Error, self.position,
+                                             "unterminated string literal", vec![
+                        error::note(self.token_start, "string literal began here"),
                     ]);
                     break;
                 }
@@ -152,8 +154,8 @@ impl<'src> Lexer<'src> {
                         'r' => '\r',
                         't' => '\t',
                         c => {
-                            report(Error, escape_start..self.position,
-                                   format!("invalid character escape: {:?}", c));
+                            error::report(Error, escape_start..self.position,
+                                          format!("invalid character escape: {:?}", c));
                             c
                         }
                     });
@@ -207,7 +209,7 @@ pub fn parse_fn_def(tokens: &[Token]) -> Result<ast::FnDef, ()> {
     let name = match tokens[1].kind {
         Ident(name) => name,
         _ => {
-            report(Error, tokens[1].span, "expected identifier for fn name");
+            error::report(Error, tokens[1].span, "expected identifier for fn name");
             return Err(());
         }
     };
@@ -310,90 +312,15 @@ fn is_ident_continue(c: char) -> bool {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Errors
-////////////////////////////////////////////////////////////////////////////////
-
-#[must_use]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ErrorReport {
-    pub level: ErrorLevel,
-    pub main_note: ErrorNote,
-    pub extra_notes: Vec<ErrorNote>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ErrorNote {
-    pub span: Span,
-    pub message: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ErrorLevel {
-    Error,
-    Warning,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ErrorReporter {
-    pub errors: Vec<ErrorReport>,
-}
-
-impl ErrorReporter {
-    pub fn new() -> Self {
-        ErrorReporter { errors: Vec::new() }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.errors.is_empty()
-    }
-
-    pub fn reset(&mut self) {
-        self.errors.clear();
-    }
-}
-
-thread_local!(static ERROR_REPORTER: RefCell<ErrorReporter> = RefCell::new(ErrorReporter::new()));
-
-impl ErrorReport {
-    pub fn new<S, T>(level: ErrorLevel, span: S, message: T, notes: Vec<ErrorNote>) -> Self
-            where S: Into<Span>, T: Into<String> {
-        ErrorReport {
-            level: level,
-            main_note: ErrorNote {
-                span: span.into(),
-                message: message.into(),
-            },
-            extra_notes: notes,
-        }
-    }
-
-    pub fn report(self) {
-        ERROR_REPORTER.with(|reporter| reporter.borrow_mut().errors.push(self));
-    }
-}
-
-pub fn report<S, T>(level: ErrorLevel, span: S, message: T) where S: Into<Span>, T: Into<String> {
-    ErrorReport::new(level, span.into(), message.into(), Vec::new()).report()
-}
-
-pub fn report_with_notes<S, T>(level: ErrorLevel, span: S, message: T, notes: Vec<ErrorNote>)
-        where S: Into<Span>, T: Into<String> {
-    ErrorReport::new(level, span.into(), message.into(), notes).report()
-}
-
-pub fn note<S, T>(span: S, message: T) -> ErrorNote where S: Into<Span>, T: Into<String> {
-    ErrorNote { span: span.into(), message: message.into() }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // Tests
 ////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod test {
+    use error::{self, Level, Report, Note, note};
+    use error::Level::*;
     use intern::Symbol;
-    use super::{ERROR_REPORTER, ErrorReport, ErrorLevel, ErrorNote, Lexer, Span, Token, TokenKind, note};
-    use super::ErrorLevel::*;
+    use super::{Lexer, Span, Token, TokenKind};
     use super::TokenKind::*;
 
     #[test]
@@ -513,12 +440,12 @@ mod test {
         StringLit(Symbol::intern(s))
     }
 
-    fn err<S, T>(level: ErrorLevel, span: S, message: T, notes: &[ErrorNote]) -> ErrorReport
+    fn err<S, T>(level: error::Level, span: S, message: T, notes: &[error::Note]) -> error::Report
             where S: Into<Span>, T: Into<String> {
-        ErrorReport::new(level, span.into(), message.into(), Vec::from(notes))
+        error::Report::new(level, span.into(), message.into(), Vec::from(notes))
     }
 
-    fn lexer_test(source: &str, expected: Vec<TokenKind>, expected_errors: &[ErrorReport]) {
+    fn lexer_test(source: &str, expected: Vec<TokenKind>, expected_errors: &[error::Report]) {
         let mut lexer = Lexer::new(source);
 
         for expected_token in expected {
@@ -528,7 +455,7 @@ mod test {
         let extra_tokens: Vec<Token> = lexer.collect();
         assert_eq!(extra_tokens, &[]);
 
-        ERROR_REPORTER.with(|reporter| {
+        error::REPORTER.with(|reporter| {
             let mut r = reporter.borrow_mut();
 
             for expected_error in expected_errors {

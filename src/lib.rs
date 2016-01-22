@@ -2,7 +2,8 @@ extern crate libc;
 extern crate llvm_sys;
 
 pub mod ast;
-pub mod intern;
+mod error;
+mod intern;
 pub mod parser;
-pub mod str_arena;
+mod str_arena;
 pub mod trans;
